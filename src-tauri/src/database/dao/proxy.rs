@@ -64,7 +64,7 @@ impl Database {
             let conn = lock_conn!(self.conn);
             conn.query_row(
                 "SELECT proxy_enabled, listen_address, listen_port, enable_logging,
-                        rate_limit_enabled, rate_limit_per_minute
+                        rate_limit_enabled, rate_limit_per_minute, max_concurrent_requests
                  FROM proxy_config WHERE app_type = 'claude'",
                 [],
                 |row| {
@@ -75,6 +75,7 @@ impl Database {
                         enable_logging: row.get::<_, i32>(3)? != 0,
                         rate_limit_enabled: row.get::<_, i32>(4).unwrap_or(0) != 0,
                         rate_limit_per_minute: row.get::<_, i32>(5).unwrap_or(40) as u32,
+                        max_concurrent_requests: row.get::<_, i32>(6).unwrap_or(5) as u32,
                     })
                 },
             )
@@ -93,6 +94,7 @@ impl Database {
                     enable_logging: true,
                     rate_limit_enabled: false,
                     rate_limit_per_minute: 40,
+                    max_concurrent_requests: 5,
                 })
             }
             Err(e) => Err(AppError::Database(e.to_string())),
@@ -114,6 +116,7 @@ impl Database {
                 enable_logging = ?4,
                 rate_limit_enabled = ?5,
                 rate_limit_per_minute = ?6,
+                max_concurrent_requests = ?7,
                 updated_at = datetime('now')",
             rusqlite::params![
                 if config.proxy_enabled { 1 } else { 0 },
@@ -122,6 +125,7 @@ impl Database {
                 if config.enable_logging { 1 } else { 0 },
                 if config.rate_limit_enabled { 1 } else { 0 },
                 config.rate_limit_per_minute as i32,
+                config.max_concurrent_requests as i32,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -421,7 +425,7 @@ impl Database {
                 "SELECT listen_address, listen_port, max_retries,
                         enable_logging,
                         streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                        rate_limit_enabled, rate_limit_per_minute
+                        rate_limit_enabled, rate_limit_per_minute, max_concurrent_requests
                  FROM proxy_config WHERE app_type = 'claude'",
                 [],
                 |row| {
@@ -437,6 +441,7 @@ impl Database {
                         non_streaming_timeout: row.get::<_, i32>(6).unwrap_or(600) as u64,
                         rate_limit_enabled: row.get::<_, i32>(7).unwrap_or(0) != 0,
                         rate_limit_per_minute: row.get::<_, i32>(8).unwrap_or(40) as u32,
+                        max_concurrent_requests: row.get::<_, i32>(9).unwrap_or(5) as u32,
                     })
                 },
             )
@@ -470,6 +475,7 @@ impl Database {
                 non_streaming_timeout = ?7,
                 rate_limit_enabled = ?8,
                 rate_limit_per_minute = ?9,
+                max_concurrent_requests = ?10,
                 updated_at = datetime('now')",
             rusqlite::params![
                 config.listen_address,
@@ -481,6 +487,7 @@ impl Database {
                 config.non_streaming_timeout as i32,
                 if config.rate_limit_enabled { 1 } else { 0 },
                 config.rate_limit_per_minute as i32,
+                config.max_concurrent_requests as i32,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;

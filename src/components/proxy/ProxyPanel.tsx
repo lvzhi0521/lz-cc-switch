@@ -63,12 +63,16 @@ export function ProxyPanel({
   // 限流速率配置的本地状态
   const [rateLimitPerMinute, setRateLimitPerMinute] = useState("40");
 
+  // 并发控制配置的本地状态
+  const [maxConcurrentRequests, setMaxConcurrentRequests] = useState("5");
+
   // 同步全局配置到本地状态
   useEffect(() => {
     if (globalConfig) {
       setListenAddress(globalConfig.listenAddress);
       setListenPort(String(globalConfig.listenPort));
       setRateLimitPerMinute(String(globalConfig.rateLimitPerMinute ?? 40));
+      setMaxConcurrentRequests(String(globalConfig.maxConcurrentRequests ?? 5));
     }
   }, [globalConfig]);
 
@@ -169,6 +173,37 @@ export function ProxyPanel({
     } catch (error) {
       toast.error(
         t("proxy.rateLimit.saveFailed", { defaultValue: "保存限流速率失败" }),
+      );
+    }
+  };
+
+  const handleMaxConcurrentSave = async () => {
+    if (!globalConfig) return;
+    const value = parseInt(maxConcurrentRequests);
+    if (isNaN(value) || value < 1 || value > 50) {
+      toast.error(
+        t("proxy.rateLimit.invalidConcurrency", {
+          defaultValue: "请输入 1-50 之间的数字",
+        }),
+      );
+      return;
+    }
+    try {
+      await updateGlobalConfig.mutateAsync({
+        ...globalConfig,
+        maxConcurrentRequests: value,
+      });
+      toast.success(
+        t("proxy.rateLimit.concurrencySaved", {
+          defaultValue: "并发限制已保存",
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(
+        t("proxy.rateLimit.concurrencySaveFailed", {
+          defaultValue: "保存并发限制失败",
+        }),
       );
     }
   };
@@ -559,7 +594,7 @@ export function ProxyPanel({
                   </span>
                 </div>
 
-                {/* 进度条 */}
+                {/* 进度条 + 等待队列 */}
                 <div className="space-y-1.5">
                   <div className="flex items-baseline justify-between">
                     <span className="text-2xl font-bold text-foreground">
@@ -569,11 +604,34 @@ export function ProxyPanel({
                         / {status.rate_limit_status.max_per_minute}
                       </span>
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      {t("proxy.rateLimit.used", {
-                        defaultValue: "已使用",
-                      })}
-                    </span>
+                    <div className="flex items-baseline gap-1">
+                      <span
+                        className={`text-sm font-medium ${
+                          status.rate_limit_status.waiting_count > 0
+                            ? "text-orange-500"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {status.rate_limit_status.waiting_count}
+                        <span
+                          className={`text-xs font-normal ${
+                            status.rate_limit_status.waiting_count > 0
+                              ? "text-orange-400"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {" "}
+                          {t("proxy.rateLimit.waiting", {
+                            defaultValue: "排队中",
+                          })}
+                        </span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("proxy.rateLimit.used", {
+                          defaultValue: "已使用",
+                        })}
+                      </span>
+                    </div>
                   </div>
                   <div className="h-2 rounded-full bg-muted overflow-hidden">
                     <div
@@ -593,6 +651,62 @@ export function ProxyPanel({
                           100,
                           (status.rate_limit_status.current_count /
                             status.rate_limit_status.max_per_minute) *
+                            100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* 并发控制显示 */}
+                <div className="space-y-1.5">
+                  <div className="flex items-baseline justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {t("proxy.rateLimit.concurrentLabel", {
+                          defaultValue: "并发请求",
+                        })}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-lg font-bold text-foreground">
+                        {status.rate_limit_status.current_concurrent}
+                        <span className="text-sm font-normal text-muted-foreground">
+                          {" "}
+                          / {status.rate_limit_status.max_concurrent}
+                        </span>
+                      </span>
+                      {status.rate_limit_status.concurrent_waiting_count > 0 && (
+                        <span className="text-sm font-medium text-orange-500">
+                          {status.rate_limit_status.concurrent_waiting_count}
+                          <span className="text-xs font-normal text-orange-400">
+                            {" "}
+                            {t("proxy.rateLimit.concurrentWaiting", {
+                              defaultValue: "排队中",
+                            })}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        status.rate_limit_status.current_concurrent /
+                          status.rate_limit_status.max_concurrent >
+                        0.8
+                          ? "bg-red-400"
+                          : status.rate_limit_status.current_concurrent /
+                              status.rate_limit_status.max_concurrent >
+                            0.5
+                            ? "bg-yellow-400"
+                            : "bg-blue-400"
+                      }`}
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (status.rate_limit_status.current_concurrent /
+                            status.rate_limit_status.max_concurrent) *
                             100,
                         )}%`,
                       }}
@@ -640,6 +754,36 @@ export function ProxyPanel({
                     size="sm"
                     variant="outline"
                     onClick={handleRateLimitPerMinuteSave}
+                    disabled={updateGlobalConfig.isPending}
+                  >
+                    {t("common.save", { defaultValue: "保存" })}
+                  </Button>
+                </div>
+
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">
+                      {t("proxy.rateLimit.maxConcurrent", {
+                        defaultValue: "最大并发请求数",
+                      })}
+                    </Label>
+                    <Input
+                      type="number"
+                      value={maxConcurrentRequests}
+                      onChange={(e) => setMaxConcurrentRequests(e.target.value)}
+                      placeholder="5"
+                      disabled={updateGlobalConfig.isPending}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {t("proxy.rateLimit.maxConcurrentHint", {
+                        defaultValue: "限制同时发往上游的请求数，防止并发触发 429",
+                      })}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleMaxConcurrentSave}
                     disabled={updateGlobalConfig.isPending}
                   >
                     {t("common.save", { defaultValue: "保存" })}

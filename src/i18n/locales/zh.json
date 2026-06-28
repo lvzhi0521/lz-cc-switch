@@ -2517,6 +2517,28 @@
       "streamingIdleHint": "数据块之间的最大间隔，范围 60-600 秒，填 0 禁用（防止中途卡住）",
       "nonStreamingHint": "非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）"
     },
+    "rateLimit": {
+      "title": "请求限流",
+      "enableLabel": "启用限流",
+      "enableDescription": "自动延时，防止上游 429",
+      "window": "60s 滚动窗口",
+      "waiting": "排队中",
+      "used": "已使用",
+      "perMinute": "每分钟最大请求数",
+      "maxConcurrent": "最大并发请求数",
+      "maxConcurrentHint": "限制同时发往上游的请求数，防止并发触发 429",
+      "concurrentLabel": "并发请求",
+      "concurrentWaiting": "排队中",
+      "enabled": "限流已启用",
+      "disabled": "限流已关闭",
+      "toggleFailed": "切换限流失败",
+      "invalidValue": "请输入 1-1000 之间的数字",
+      "invalidConcurrency": "请输入 1-50 之间的数字",
+      "saved": "限流速率已保存",
+      "saveFailed": "保存限流速率失败",
+      "concurrencySaved": "并发限制已保存",
+      "concurrencySaveFailed": "保存并发限制失败"
+    },
     "logging": {
       "enabled": "日志记录已启用",
       "disabled": "日志记录已关闭",

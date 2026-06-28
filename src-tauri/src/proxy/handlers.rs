@@ -9,7 +9,7 @@
 
 use super::{
     error_mapper::{get_error_message, map_proxy_error_to_status},
-    forwarder::ActiveConnectionGuard,
+    forwarder::ResponseGuards,
     handler_config::{
         claude_stream_usage_event_filter, codex_stream_usage_event_filter, CLAUDE_PARSER_CONFIG,
         CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG, OPENAI_PARSER_CONFIG,
@@ -207,7 +207,7 @@ async fn handle_messages_for_app(
         }
     };
 
-    let connection_guard = result.connection_guard.take();
+    let response_guards = result.response_guards.take();
     ctx.outbound_model = result.outbound_model.take();
     ctx.provider = result.provider;
     let api_format = result
@@ -230,7 +230,7 @@ async fn handle_messages_for_app(
             &body,
             is_stream,
             &api_format,
-            connection_guard,
+            response_guards,
         )
         .await;
     }
@@ -241,7 +241,7 @@ async fn handle_messages_for_app(
         &ctx,
         &state,
         &CLAUDE_PARSER_CONFIG,
-        connection_guard,
+        response_guards,
     )
     .await
 }
@@ -283,7 +283,7 @@ async fn handle_claude_transform(
     original_body: &Value,
     is_stream: bool,
     api_format: &str,
-    connection_guard: Option<ActiveConnectionGuard>,
+    response_guards: Option<ResponseGuards>,
 ) -> Result<axum::response::Response, ProxyError> {
     let status = response.status();
     let is_codex_oauth = ctx
@@ -400,7 +400,7 @@ async fn handle_claude_transform(
             "Claude/OpenRouter",
             usage_collector,
             timeout_config,
-            connection_guard,
+            response_guards,
         );
 
         let mut headers = axum::http::HeaderMap::new();
@@ -622,7 +622,7 @@ pub async fn handle_chat_completions(
         }
     };
 
-    let connection_guard = result.connection_guard.take();
+    let response_guards = result.response_guards.take();
     ctx.outbound_model = result.outbound_model.take();
     ctx.provider = result.provider;
     let response = result.response;
@@ -632,7 +632,7 @@ pub async fn handle_chat_completions(
         &ctx,
         &state,
         &OPENAI_PARSER_CONFIG,
-        connection_guard,
+        response_guards,
     )
     .await
 }
@@ -688,7 +688,7 @@ pub async fn handle_responses(
         }
     };
 
-    let connection_guard = result.connection_guard.take();
+    let response_guards = result.response_guards.take();
     ctx.outbound_model = result.outbound_model.take();
     ctx.provider = result.provider;
     let response = result.response;
@@ -699,7 +699,7 @@ pub async fn handle_responses(
             &ctx,
             &state,
             is_stream,
-            connection_guard,
+            response_guards,
             codex_tool_context,
         )
         .await;
@@ -710,7 +710,7 @@ pub async fn handle_responses(
         &ctx,
         &state,
         &CODEX_PARSER_CONFIG,
-        connection_guard,
+        response_guards,
     )
     .await
 }
@@ -766,7 +766,7 @@ pub async fn handle_responses_compact(
         }
     };
 
-    let connection_guard = result.connection_guard.take();
+    let response_guards = result.response_guards.take();
     ctx.outbound_model = result.outbound_model.take();
     ctx.provider = result.provider;
     let response = result.response;
@@ -777,7 +777,7 @@ pub async fn handle_responses_compact(
             &ctx,
             &state,
             is_stream,
-            connection_guard,
+            response_guards,
             codex_tool_context,
         )
         .await;
@@ -788,7 +788,7 @@ pub async fn handle_responses_compact(
         &ctx,
         &state,
         &CODEX_PARSER_CONFIG,
-        connection_guard,
+        response_guards,
     )
     .await
 }
@@ -798,7 +798,7 @@ async fn handle_codex_chat_to_responses_transform(
     ctx: &RequestContext,
     state: &ProxyState,
     is_stream: bool,
-    connection_guard: Option<ActiveConnectionGuard>,
+    response_guards: Option<ResponseGuards>,
     tool_context: transform_codex_chat::CodexToolContext,
 ) -> Result<axum::response::Response, ProxyError> {
     let status = response.status();
@@ -884,7 +884,7 @@ async fn handle_codex_chat_to_responses_transform(
             ctx.tag,
             usage_collector,
             ctx.streaming_timeout_config(),
-            connection_guard,
+            response_guards,
         );
 
         let mut headers = axum::http::HeaderMap::new();
@@ -901,7 +901,7 @@ async fn handle_codex_chat_to_responses_transform(
         return Ok((headers, body).into_response());
     }
 
-    let _connection_guard = connection_guard;
+    let _response_guards = response_guards;
     let body_timeout =
         if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
             std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
@@ -1342,7 +1342,7 @@ pub async fn handle_gemini(
         }
     };
 
-    let connection_guard = result.connection_guard.take();
+    let response_guards = result.response_guards.take();
     ctx.outbound_model = result.outbound_model.take();
     ctx.provider = result.provider;
     let response = result.response;
@@ -1352,7 +1352,7 @@ pub async fn handle_gemini(
         &ctx,
         &state,
         &GEMINI_PARSER_CONFIG,
-        connection_guard,
+        response_guards,
     )
     .await
 }

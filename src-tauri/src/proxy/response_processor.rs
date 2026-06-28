@@ -3,7 +3,7 @@
 //! 统一处理流式和非流式 API 响应
 
 use super::{
-    forwarder::ActiveConnectionGuard,
+    forwarder::ResponseGuards,
     handler_config::{StreamUsageEventFilter, UsageParserConfig},
     handler_context::{RequestContext, StreamingTimeoutConfig},
     hyper_client::ProxyResponse,
@@ -199,7 +199,7 @@ pub async fn handle_streaming(
     ctx: &RequestContext,
     state: &ProxyState,
     parser_config: &UsageParserConfig,
-    connection_guard: Option<ActiveConnectionGuard>,
+    response_guards: Option<ResponseGuards>,
 ) -> Response {
     let status = response.status();
     log::debug!(
@@ -242,7 +242,7 @@ pub async fn handle_streaming(
         ctx.tag,
         usage_collector,
         timeout_config,
-        connection_guard,
+        response_guards,
     );
 
     let body = axum::body::Body::from_stream(logged_stream);
@@ -262,7 +262,7 @@ pub async fn handle_non_streaming(
     state: &ProxyState,
     parser_config: &UsageParserConfig,
     // guard 在函数 scope 内持有，整包响应读取完成后随函数返回一并 drop
-    _connection_guard: Option<ActiveConnectionGuard>,
+    _response_guards: Option<ResponseGuards>,
 ) -> Result<Response, ProxyError> {
     // 整包超时：仅在故障转移开启且配置值非零时生效
     let body_timeout =
@@ -374,12 +374,12 @@ pub async fn process_response(
     ctx: &RequestContext,
     state: &ProxyState,
     parser_config: &UsageParserConfig,
-    connection_guard: Option<ActiveConnectionGuard>,
+    response_guards: Option<ResponseGuards>,
 ) -> Result<Response, ProxyError> {
     if is_sse_response(&response) {
-        Ok(handle_streaming(response, ctx, state, parser_config, connection_guard).await)
+        Ok(handle_streaming(response, ctx, state, parser_config, response_guards).await)
     } else {
-        handle_non_streaming(response, ctx, state, parser_config, connection_guard).await
+        handle_non_streaming(response, ctx, state, parser_config, response_guards).await
     }
 }
 
@@ -730,10 +730,10 @@ pub fn create_logged_passthrough_stream(
     tag: &'static str,
     usage_collector: Option<SseUsageCollector>,
     timeout_config: StreamingTimeoutConfig,
-    connection_guard: Option<ActiveConnectionGuard>,
+    response_guards: Option<ResponseGuards>,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
-        let _conn_guard = connection_guard;
+        let _guards = response_guards;
         let mut buffer = String::new();
         let mut utf8_remainder: Vec<u8> = Vec::new();
         let mut collector = usage_collector;

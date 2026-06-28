@@ -2517,6 +2517,28 @@
       "streamingIdleHint": "Max interval between data chunks, range 60-600s, 0 to disable (prevents mid-stream stalls)",
       "nonStreamingHint": "Total timeout for non-streaming requests, range 60-1200s, default 600s (10 min)"
     },
+    "rateLimit": {
+      "title": "Rate Limiting",
+      "enableLabel": "Enable Rate Limiting",
+      "enableDescription": "Auto-delay to prevent upstream 429",
+      "window": "60s sliding window",
+      "waiting": "queued",
+      "used": "used",
+      "perMinute": "Max requests per minute",
+      "maxConcurrent": "Max concurrent requests",
+      "maxConcurrentHint": "Limit simultaneous upstream requests to prevent 429 from concurrency",
+      "concurrentLabel": "Concurrent requests",
+      "concurrentWaiting": "queued",
+      "enabled": "Rate limiting enabled",
+      "disabled": "Rate limiting disabled",
+      "toggleFailed": "Failed to toggle rate limiting",
+      "invalidValue": "Please enter a number between 1-1000",
+      "invalidConcurrency": "Please enter a number between 1-50",
+      "saved": "Rate limit saved",
+      "saveFailed": "Failed to save rate limit",
+      "concurrencySaved": "Concurrency limit saved",
+      "concurrencySaveFailed": "Failed to save concurrency limit"
+    },
     "logging": {
       "enabled": "Logging enabled",
       "disabled": "Logging disabled",

@@ -43,9 +43,10 @@ pub struct ForwardResult {
     /// usage 归因不能依赖 ctx.request_model（映射前的客户端别名）：上游响应
     /// 缺失 model 或回显别名时，接管流量会被记成 claude-* 并按其定价计费。
     pub outbound_model: Option<String>,
-    /// 活跃连接 RAII guard：随响应一起流转到 response_processor / handle_claude_transform，
+    /// 响应生命周期 RAII guards：随响应一起流转到 response_processor / handle_claude_transform，
     /// 最终被 move 进流式 body future（或非流式响应作用域），覆盖整个响应生命周期。
-    pub(crate) connection_guard: Option<ActiveConnectionGuard>,
+    /// 包含活跃连接计数 guard + 并发限流 permit，两者均在 Drop 时自动释放。
+    pub(crate) response_guards: Option<ResponseGuards>,
 }
 
 pub struct ForwardError {
@@ -91,6 +92,16 @@ impl Drop for ActiveConnectionGuard {
     }
 }
 
+/// 响应生命周期 RAII guards 集合
+///
+/// 把 `ActiveConnectionGuard`（活跃连接计数）和 `OwnedSemaphorePermit`（并发限流许可）
+/// 打包在一起，随响应一起流转到 response_processor，最终 move 进流式 body future，
+/// 覆盖整个响应生命周期。两个 guard 均在 Drop 时自动释放对应资源。
+pub(crate) struct ResponseGuards {
+    pub connection_guard: ActiveConnectionGuard,
+    pub concurrency_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+}
+
 pub struct RequestForwarder {
     /// 共享的 ProviderRouter（持有熔断器状态）
     router: Arc<ProviderRouter>,
@@ -114,8 +125,11 @@ pub struct RequestForwarder {
     optimizer_config: OptimizerConfig,
     /// Copilot 优化器配置
     copilot_optimizer_config: CopilotOptimizerConfig,
-    /// 请求限流器（None 表示未启用）
-    rate_limiter: Option<super::rate_limiter::RateLimiter>,
+    /// 请求限流器（Arc<RwLock> 引用，与 ProxyState 共享同一实例）
+    /// — 热更新时所有请求（包括已创建但未完成的 forwarder）都用同一个限流器实例
+    /// — 如果用 Option<RateLimiter> 快照，apply_runtime_config 创建新限流器后，
+    ///   旧请求仍持有旧限流器 Arc，新请求用新限流器 Arc，两套计数不共享
+    rate_limiter: Arc<tokio::sync::RwLock<Option<super::rate_limiter::RateLimiter>>>,
     /// 非流式请求超时（秒）
     non_streaming_timeout: std::time::Duration,
     /// 流式请求响应头等待超时（秒）
@@ -193,7 +207,7 @@ impl RequestForwarder {
         optimizer_config: OptimizerConfig,
         copilot_optimizer_config: CopilotOptimizerConfig,
         max_retries: u32,
-        rate_limiter: Option<super::rate_limiter::RateLimiter>,
+        rate_limiter: Arc<tokio::sync::RwLock<Option<super::rate_limiter::RateLimiter>>>,
     ) -> Self {
         // max_retries 是「失败后重试次数」语义，attempt 上限 = retries + 1。
         // saturating_add 防止 u32::MAX + 1 溢出。
@@ -342,6 +356,36 @@ impl RequestForwarder {
             s.total_requests = s.total_requests.saturating_add(1);
             s.last_request_at = Some(chrono::Utc::now().to_rfc3339());
         }
+
+        // 请求限流：在客户端请求级别获取频率时隙 + 并发许可
+        // — 每个客户端请求只消耗一个频率时隙和一个并发许可，故障转移/重试不再重复
+        // — 如果 acquire() 放在 forward() 内，故障转移时同一请求会多次消耗时隙，
+        //   导致实际发送量远超 max_per_minute
+        // — 使用 Arc<RwLock> 引用而非快照，确保热更新后所有请求共用同一限流器实例
+        // — 并发许可（OwnedSemaphorePermit）随响应流转，在响应完全消费后释放
+        // — ⚠️ 关键：必须在 RwLock 读锁释放后再进行阻塞等待的 acquire，
+        //   否则 acquire() 内部 sleep 期间读锁一直被持有，阻塞 apply_runtime_config()
+        //   的写锁，导致配置热更新失效
+        let concurrency_permit = {
+            // 仅在 RwLock 读锁内做轻量操作：clone RateLimiter 的 Arc 引用，然后立即释放读锁
+            // RateLimiter::clone 只是 Arc::clone，不复制内部数据
+            let rl_arc = {
+                let rl_guard = self.rate_limiter.read().await;
+                rl_guard.as_ref().map(|rl| rl.clone())
+            };
+            // 读锁已释放（rl_guard drop），现在在锁外进行阻塞等待的 acquire
+            if let Some(rate_limiter) = rl_arc {
+                // 1. 先获取频率时隙（阻塞等待，可能 sleep 最长 60s）
+                rate_limiter.acquire().await;
+                // 2. 再获取并发许可（阻塞等待）
+                //    顺序：频率 → 并发。频率时隙已预约（时间戳入队），等待并发许可期间
+                //    该时隙被"占用"但请求尚未发出——这是偏保守行为，不会导致超额。
+                Some(rate_limiter.acquire_concurrency_owned().await)
+            } else {
+                None
+            }
+        };
+
         let result = self
             .forward_with_retry_inner(
                 app_type, method, endpoint, body, headers, extensions, providers,
@@ -351,7 +395,10 @@ impl RequestForwarder {
         // 在流式 body 的 future 内才真正 drop。
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
         result.map(|mut fr| {
-            fr.connection_guard = Some(guard);
+            fr.response_guards = Some(ResponseGuards {
+                connection_guard: guard,
+                concurrency_permit,
+            });
             fr
         })
     }
@@ -521,7 +568,7 @@ impl RequestForwarder {
                         provider: provider.clone(),
                         claude_api_format,
                         outbound_model,
-                        connection_guard: None,
+                        response_guards: None,
                     });
                 }
                 Err(e) => {
@@ -624,7 +671,7 @@ impl RequestForwarder {
                                         provider: provider.clone(),
                                         claude_api_format,
                                         outbound_model,
-                                        connection_guard: None,
+                                        response_guards: None,
                                     });
                                 }
                                 Err(retry_err) => {
@@ -773,7 +820,7 @@ impl RequestForwarder {
                                             provider: provider.clone(),
                                             claude_api_format,
                                             outbound_model,
-                                            connection_guard: None,
+                                            response_guards: None,
                                         });
                                     }
                                     Err(retry_err) => {
@@ -933,7 +980,7 @@ impl RequestForwarder {
                                         provider: provider.clone(),
                                         claude_api_format,
                                         outbound_model,
-                                        connection_guard: None,
+                                        response_guards: None,
                                     });
                                 }
                                 Err(retry_err) => {
@@ -1878,11 +1925,6 @@ impl RequestForwarder {
             resolved_claude_api_format.as_deref(),
             is_copilot,
         );
-
-        // 请求限流：如果启用了限流，在发送请求前等待直到有 token
-        if let Some(ref rate_limiter) = self.rate_limiter {
-            rate_limiter.acquire().await;
-        }
 
         // 发送请求
         let response = if is_socks_proxy || !preserve_exact_header_case {

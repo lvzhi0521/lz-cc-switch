@@ -342,6 +342,10 @@ impl Database {
             "ALTER TABLE proxy_config ADD COLUMN rate_limit_per_minute INTEGER NOT NULL DEFAULT 40",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE proxy_config ADD COLUMN max_concurrent_requests INTEGER NOT NULL DEFAULT 5",
+            [],
+        );
 
         // 兼容：若旧版 proxy_config 仍为单例结构（无 app_type），则在启动时直接转换为三行结构
         // 说明：user_version=2 时不会再触发 v1->v2 迁移，但新代码查询依赖 app_type 列。

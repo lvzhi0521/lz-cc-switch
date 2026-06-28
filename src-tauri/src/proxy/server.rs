@@ -85,7 +85,7 @@ impl ProxyServer {
             app_handle,
             failover_manager,
             rate_limiter: Arc::new(RwLock::new(if config.rate_limit_enabled {
-                Some(RateLimiter::new(config.rate_limit_per_minute))
+                Some(RateLimiter::new(config.rate_limit_per_minute, config.max_concurrent_requests))
             } else {
                 None
             })),
@@ -287,17 +287,25 @@ impl ProxyServer {
         let rate_limiter_guard = self.state.rate_limiter.read().await;
         status.rate_limit_status = match rate_limiter_guard.as_ref() {
             Some(rl) => {
-                let (current_count, max_per_minute) = rl.status();
+                let rl_status = rl.status();
                 RateLimitStatus {
                     enabled: true,
-                    current_count,
-                    max_per_minute,
+                    current_count: rl_status.current_count,
+                    max_per_minute: rl_status.max_per_minute,
+                    waiting_count: rl_status.waiting_count,
+                    current_concurrent: rl_status.current_concurrent,
+                    max_concurrent: rl_status.max_concurrent,
+                    concurrent_waiting_count: rl_status.concurrent_waiting_count,
                 }
             }
             None => RateLimitStatus {
                 enabled: config.rate_limit_enabled,
                 current_count: 0,
                 max_per_minute: config.rate_limit_per_minute,
+                waiting_count: 0,
+                current_concurrent: 0,
+                max_concurrent: config.max_concurrent_requests,
+                concurrent_waiting_count: 0,
             },
         };
 
@@ -396,13 +404,14 @@ impl ProxyServer {
         if config.rate_limit_enabled {
             match rate_limiter_guard.as_mut() {
             Some(rl) => {
-                // 已有限流器：更新速率
+                // 已有限流器：更新速率和并发限制
                 rl.update_rate(config.rate_limit_per_minute).await;
+                rl.update_concurrency(config.max_concurrent_requests);
             }
                 None => {
                     // 未启用限流 -> 创建新的限流器
                     *rate_limiter_guard =
-                        Some(RateLimiter::new(config.rate_limit_per_minute));
+                        Some(RateLimiter::new(config.rate_limit_per_minute, config.max_concurrent_requests));
                 }
             }
         } else {

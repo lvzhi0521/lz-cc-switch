@@ -223,7 +223,10 @@ impl RequestContext {
             0
         };
 
-        let rate_limiter = state.rate_limiter.read().await.clone();
+        // 直接传递 Arc<RwLock> 引用而非 clone 快照
+        // — clone Option<RateLimiter> 会创建独立 Arc，热更新后新旧限流器计数不共享
+        // — 传递 Arc<RwLock> 引用确保所有请求始终读取同一限流器实例
+        let rate_limiter = state.rate_limiter.clone();
 
         RequestForwarder::new(
             state.provider_router.clone(),

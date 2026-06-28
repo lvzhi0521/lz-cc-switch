@@ -2489,6 +2489,28 @@
       "streamingIdleHint": "資料區塊之間的最大間隔，範圍 60-600 秒，填 0 停用（防止中途卡住）",
       "nonStreamingHint": "非串流請求的總逾時時間，範圍 60-1200 秒，預設 600 秒（10 分鐘）"
     },
+    "rateLimit": {
+      "title": "請求限流",
+      "enableLabel": "啟用限流",
+      "enableDescription": "自動延時，防止上游 429",
+      "window": "60s 滾動窗口",
+      "waiting": "排隊中",
+      "used": "已使用",
+      "perMinute": "每分鐘最大請求數",
+      "maxConcurrent": "最大並行請求數",
+      "maxConcurrentHint": "限制同時發往上游的請求數，防止並發觸發 429",
+      "concurrentLabel": "並行請求",
+      "concurrentWaiting": "排隊中",
+      "enabled": "限流已啟用",
+      "disabled": "限流已關閉",
+      "toggleFailed": "切換限流失敗",
+      "invalidValue": "請輸入 1-1000 之間的數字",
+      "invalidConcurrency": "請輸入 1-50 之間的數字",
+      "saved": "限流速率已儲存",
+      "saveFailed": "儲存限流速率失敗",
+      "concurrencySaved": "並行限制已儲存",
+      "concurrencySaveFailed": "儲存並行限制失敗"
+    },
     "logging": {
       "enabled": "日誌紀錄已啟用",
       "disabled": "日誌紀錄已關閉",

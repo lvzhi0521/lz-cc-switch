@@ -12,12 +12,18 @@ export interface ProxyConfig {
   // 限流配置
   rate_limit_enabled: boolean;
   rate_limit_per_minute: number;
+  // 并发控制配置
+  max_concurrent_requests: number;
 }
 
 export interface RateLimitStatus {
   enabled: boolean;
   current_count: number;
   max_per_minute: number;
+  waiting_count: number;
+  current_concurrent: number;
+  max_concurrent: number;
+  concurrent_waiting_count: number;
 }
 
 export interface ProxyStatus {
@@ -133,6 +139,7 @@ export interface GlobalProxyConfig {
   enableLogging: boolean;
   rateLimitEnabled: boolean;
   rateLimitPerMinute: number;
+  maxConcurrentRequests: number;
 }
 
 // 应用级代理配置（每个 app 独立）

@@ -31,6 +31,9 @@ pub struct ProxyConfig {
     /// 限流速率：每分钟最大请求数（默认 40）
     #[serde(default = "default_rate_limit_per_minute")]
     pub rate_limit_per_minute: u32,
+    /// 最大并发请求数（默认 5）— 限制同时发往上游的 in-flight 请求数
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent_requests: u32,
 }
 
 fn default_streaming_first_byte_timeout() -> u64 {
@@ -49,6 +52,10 @@ fn default_rate_limit_per_minute() -> u32 {
     40
 }
 
+fn default_max_concurrent_requests() -> u32 {
+    5
+}
+
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
@@ -63,6 +70,7 @@ impl Default for ProxyConfig {
             non_streaming_timeout: 600,
             rate_limit_enabled: false,
             rate_limit_per_minute: 40,
+            max_concurrent_requests: 5,
         }
     }
 }
@@ -115,6 +123,18 @@ pub struct RateLimitStatus {
     pub current_count: usize,
     /// 每分钟最大允许调用次数
     pub max_per_minute: u32,
+    /// 当前正在等待（延时排队）的请求数
+    #[serde(default)]
+    pub waiting_count: usize,
+    /// 当前正在执行的并发请求数（in-flight）
+    #[serde(default)]
+    pub current_concurrent: usize,
+    /// 最大允许并发请求数
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent: u32,
+    /// 当前正在等待并发许可的请求数
+    #[serde(default)]
+    pub concurrent_waiting_count: usize,
 }
 
 /// 活跃的代理目标信息
@@ -194,6 +214,9 @@ pub struct GlobalProxyConfig {
     /// 限流速率：每分钟最大请求数
     #[serde(default = "default_rate_limit_per_minute")]
     pub rate_limit_per_minute: u32,
+    /// 最大并发请求数
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent_requests: u32,
 }
 
 /// 应用级代理配置（每个 app 独立）

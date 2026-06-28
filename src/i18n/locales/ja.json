@@ -2517,6 +2517,28 @@
       "streamingIdleHint": "データチャンク間の最大間隔、範囲 60-600 秒、0 で無効化（途中停止を防止）",
       "nonStreamingHint": "非ストリーミングリクエストの合計タイムアウト、範囲 60-1200 秒、デフォルト 600 秒（10 分）"
     },
+    "rateLimit": {
+      "title": "リクエスト制限",
+      "enableLabel": "リクエスト制限を有効化",
+      "enableDescription": "自動遅延で上游の 429 を防止",
+      "window": "60秒 スライディングウィンドウ",
+      "waiting": "待機中",
+      "used": "使用済み",
+      "perMinute": "毎分最大リクエスト数",
+      "maxConcurrent": "最大同時リクエスト数",
+      "maxConcurrentHint": "同時に上游へ送るリクエスト数を制限し、並発による 429 を防止",
+      "concurrentLabel": "同時リクエスト",
+      "concurrentWaiting": "待機中",
+      "enabled": "リクエスト制限が有効になりました",
+      "disabled": "リクエスト制限が無効になりました",
+      "toggleFailed": "リクエスト制限の切り替えに失敗しました",
+      "invalidValue": "1〜1000の数字を入力してください",
+      "invalidConcurrency": "1〜50の数字を入力してください",
+      "saved": "リクエスト制限が保存されました",
+      "saveFailed": "リクエスト制限の保存に失敗しました",
+      "concurrencySaved": "同時リクエスト制限が保存されました",
+      "concurrencySaveFailed": "同時リクエスト制限の保存に失敗しました"
+    },
     "logging": {
       "enabled": "ログ記録が有効になりました",
       "disabled": "ログ記録が無効になりました",

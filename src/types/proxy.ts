@@ -9,6 +9,15 @@ export interface ProxyConfig {
   streaming_first_byte_timeout: number;
   streaming_idle_timeout: number;
   non_streaming_timeout: number;
+  // 限流配置
+  rate_limit_enabled: boolean;
+  rate_limit_per_minute: number;
+}
+
+export interface RateLimitStatus {
+  enabled: boolean;
+  current_count: number;
+  max_per_minute: number;
 }
 
 export interface ProxyStatus {
@@ -27,6 +36,7 @@ export interface ProxyStatus {
   last_error: string | null;
   failover_count: number;
   active_targets?: ActiveTarget[];
+  rate_limit_status?: RateLimitStatus;
 }
 
 export interface ActiveTarget {
@@ -121,6 +131,8 @@ export interface GlobalProxyConfig {
   listenAddress: string;
   listenPort: number;
   enableLogging: boolean;
+  rateLimitEnabled: boolean;
+  rateLimitPerMinute: number;
 }
 
 // 应用级代理配置（每个 app 独立）

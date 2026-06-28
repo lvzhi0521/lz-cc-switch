@@ -9,6 +9,7 @@ import {
   Loader2,
   Zap,
   Power,
+  Gauge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -59,11 +60,15 @@ export function ProxyPanel({
   const [listenAddress, setListenAddress] = useState("127.0.0.1");
   const [listenPort, setListenPort] = useState("15721");
 
+  // 限流速率配置的本地状态
+  const [rateLimitPerMinute, setRateLimitPerMinute] = useState("40");
+
   // 同步全局配置到本地状态
   useEffect(() => {
     if (globalConfig) {
       setListenAddress(globalConfig.listenAddress);
       setListenPort(String(globalConfig.listenPort));
+      setRateLimitPerMinute(String(globalConfig.rateLimitPerMinute ?? 40));
     }
   }, [globalConfig]);
 
@@ -117,6 +122,53 @@ export function ProxyPanel({
     } catch (error) {
       toast.error(
         t("proxy.logging.failed", { defaultValue: "切换日志状态失败" }),
+      );
+    }
+  };
+
+  const handleRateLimitToggle = async (enabled: boolean) => {
+    if (!globalConfig) return;
+    try {
+      await updateGlobalConfig.mutateAsync({
+        ...globalConfig,
+        rateLimitEnabled: enabled,
+      });
+      toast.success(
+        enabled
+          ? t("proxy.rateLimit.enabled", { defaultValue: "限流已启用" })
+          : t("proxy.rateLimit.disabled", { defaultValue: "限流已关闭" }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(
+        t("proxy.rateLimit.toggleFailed", { defaultValue: "切换限流失败" }),
+      );
+    }
+  };
+
+  const handleRateLimitPerMinuteSave = async () => {
+    if (!globalConfig) return;
+    const value = parseInt(rateLimitPerMinute);
+    if (isNaN(value) || value < 1 || value > 1000) {
+      toast.error(
+        t("proxy.rateLimit.invalidValue", {
+          defaultValue: "请输入 1-1000 之间的数字",
+        }),
+      );
+      return;
+    }
+    try {
+      await updateGlobalConfig.mutateAsync({
+        ...globalConfig,
+        rateLimitPerMinute: value,
+      });
+      toast.success(
+        t("proxy.rateLimit.saved", { defaultValue: "限流速率已保存" }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(
+        t("proxy.rateLimit.saveFailed", { defaultValue: "保存限流速率失败" }),
       );
     }
   };
@@ -412,6 +464,31 @@ export function ProxyPanel({
                 </div>
               </div>
 
+              {/* [5.5] Rate limit toggle (shown when not enabled, compact version) */}
+              {!(status.rate_limit_status?.enabled) && (
+                <div className="pt-3 border-t border-border">
+                  <div className="flex items-center justify-between rounded-md border border-border bg-background/60 px-3 py-2">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-medium">
+                        {t("proxy.rateLimit.title", {
+                          defaultValue: "请求限流",
+                        })}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t("proxy.rateLimit.enableDescription", {
+                          defaultValue: "自动延时，防止上游 429",
+                        })}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={globalConfig?.rateLimitEnabled ?? false}
+                      onCheckedChange={handleRateLimitToggle}
+                      disabled={updateGlobalConfig.isPending}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* [6] Provider queues */}
               {(claudeQueue.length > 0 ||
                 codexQueue.length > 0 ||
@@ -463,7 +540,115 @@ export function ProxyPanel({
               )}
             </div>
 
-            {/* [7] Stats cards */}
+            {/* [7] Rate limit panel */}
+            {status.rate_limit_status && status.rate_limit_status.enabled && (
+              <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Gauge className="h-4 w-4 text-blue-500" />
+                    <span className="text-sm font-medium">
+                      {t("proxy.rateLimit.title", {
+                        defaultValue: "请求限流",
+                      })}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {t("proxy.rateLimit.window", {
+                      defaultValue: "60s 滚动窗口",
+                    })}
+                  </span>
+                </div>
+
+                {/* 进度条 */}
+                <div className="space-y-1.5">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-2xl font-bold text-foreground">
+                      {status.rate_limit_status.current_count}
+                      <span className="text-sm font-normal text-muted-foreground">
+                        {" "}
+                        / {status.rate_limit_status.max_per_minute}
+                      </span>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("proxy.rateLimit.used", {
+                        defaultValue: "已使用",
+                      })}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        status.rate_limit_status.current_count /
+                          status.rate_limit_status.max_per_minute >
+                        0.8
+                          ? "bg-red-500"
+                          : status.rate_limit_status.current_count /
+                              status.rate_limit_status.max_per_minute >
+                            0.5
+                            ? "bg-yellow-500"
+                            : "bg-green-500"
+                      }`}
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (status.rate_limit_status.current_count /
+                            status.rate_limit_status.max_per_minute) *
+                            100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* 限流开关 + 速率配置 */}
+                <div className="flex items-center justify-between rounded-md border border-border bg-background/60 px-3 py-2">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-medium">
+                      {t("proxy.rateLimit.enableLabel", {
+                        defaultValue: "启用限流",
+                      })}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("proxy.rateLimit.enableDescription", {
+                        defaultValue: "自动延时，防止上游 429",
+                      })}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={globalConfig?.rateLimitEnabled ?? false}
+                    onCheckedChange={handleRateLimitToggle}
+                    disabled={updateGlobalConfig.isPending}
+                  />
+                </div>
+
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">
+                      {t("proxy.rateLimit.perMinute", {
+                        defaultValue: "每分钟最大请求数",
+                      })}
+                    </Label>
+                    <Input
+                      type="number"
+                      value={rateLimitPerMinute}
+                      onChange={(e) => setRateLimitPerMinute(e.target.value)}
+                      placeholder="40"
+                      disabled={updateGlobalConfig.isPending}
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRateLimitPerMinuteSave}
+                    disabled={updateGlobalConfig.isPending}
+                  >
+                    {t("common.save", { defaultValue: "保存" })}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* [8] Stats cards */}
             <div className="grid gap-3 md:grid-cols-4">
               <StatCard
                 icon={<Activity className="h-4 w-4" />}

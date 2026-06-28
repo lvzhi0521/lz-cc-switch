@@ -184,7 +184,7 @@ async fn handle_messages_for_app(
         .unwrap_or(false);
 
     // 转发请求
-    let forwarder = ctx.create_forwarder(&state);
+    let forwarder = ctx.create_forwarder(&state).await;
     let mut result = match forwarder
         .forward_with_retry(
             &app_type,
@@ -599,7 +599,7 @@ pub async fn handle_chat_completions(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let forwarder = ctx.create_forwarder(&state);
+    let forwarder = ctx.create_forwarder(&state).await;
     let mut result = match forwarder
         .forward_with_retry(
             &AppType::Codex,
@@ -665,7 +665,7 @@ pub async fn handle_responses(
         .unwrap_or(false);
     let codex_tool_context = transform_codex_chat::build_codex_tool_context_from_request(&body);
 
-    let forwarder = ctx.create_forwarder(&state);
+    let forwarder = ctx.create_forwarder(&state).await;
     let mut result = match forwarder
         .forward_with_retry(
             &AppType::Codex,
@@ -743,7 +743,7 @@ pub async fn handle_responses_compact(
         .unwrap_or(false);
     let codex_tool_context = transform_codex_chat::build_codex_tool_context_from_request(&body);
 
-    let forwarder = ctx.create_forwarder(&state);
+    let forwarder = ctx.create_forwarder(&state).await;
     let mut result = match forwarder
         .forward_with_retry(
             &AppType::Codex,
@@ -1319,7 +1319,7 @@ pub async fn handle_gemini(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let forwarder = ctx.create_forwarder(&state);
+    let forwarder = ctx.create_forwarder(&state).await;
     let mut result = match forwarder
         .forward_with_retry(
             &AppType::Gemini,

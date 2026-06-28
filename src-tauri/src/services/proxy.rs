@@ -2645,6 +2645,17 @@ impl ProxyService {
         self.server.read().await.is_some()
     }
 
+    /// 热更新运行时配置（限流等无需重启的字段）
+    ///
+    /// 如果代理服务器正在运行，将新配置应用到运行中的服务器
+    pub async fn apply_runtime_config(&self, config: &ProxyConfig) -> Result<(), String> {
+        if let Some(server) = self.server.read().await.as_ref() {
+            server.apply_runtime_config(config).await;
+            log::info!("代理运行时配置已热更新");
+        }
+        Ok(())
+    }
+
     /// 热更新熔断器配置
     ///
     /// 如果代理服务器正在运行，将新配置应用到所有已创建的熔断器实例

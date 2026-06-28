@@ -14,6 +14,7 @@ use super::{
     log_codes::srv as log_srv,
     provider_router::ProviderRouter,
     providers::{codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore},
+    rate_limiter::RateLimiter,
     types::*,
     ProxyError,
 };
@@ -48,6 +49,8 @@ pub struct ProxyState {
     pub app_handle: Option<tauri::AppHandle>,
     /// 故障转移切换管理器
     pub failover_manager: Arc<FailoverSwitchManager>,
+    /// 请求限流器（根据配置动态创建/销毁）
+    pub rate_limiter: Arc<tokio::sync::RwLock<Option<RateLimiter>>>,
 }
 
 /// 代理HTTP服务器
@@ -81,6 +84,11 @@ impl ProxyServer {
             codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
             app_handle,
             failover_manager,
+            rate_limiter: Arc::new(RwLock::new(if config.rate_limit_enabled {
+                Some(RateLimiter::new(config.rate_limit_per_minute))
+            } else {
+                None
+            })),
         };
 
         Self {
@@ -272,6 +280,26 @@ impl ProxyServer {
                 provider_name: provider_name.clone(),
             })
             .collect();
+        drop(current_providers);
+
+        // 填充限流状态
+        let config = self.state.config.read().await;
+        let rate_limiter_guard = self.state.rate_limiter.read().await;
+        status.rate_limit_status = match rate_limiter_guard.as_ref() {
+            Some(rl) => {
+                let (current_count, max_per_minute) = rl.status();
+                RateLimitStatus {
+                    enabled: true,
+                    current_count,
+                    max_per_minute,
+                }
+            }
+            None => RateLimitStatus {
+                enabled: config.rate_limit_enabled,
+                current_count: 0,
+                max_per_minute: config.rate_limit_per_minute,
+            },
+        };
 
         status
     }
@@ -362,6 +390,25 @@ impl ProxyServer {
     /// 在不重启服务的情况下更新运行时配置
     pub async fn apply_runtime_config(&self, config: &ProxyConfig) {
         *self.state.config.write().await = config.clone();
+
+        // 热更新限流器
+        let mut rate_limiter_guard = self.state.rate_limiter.write().await;
+        if config.rate_limit_enabled {
+            match rate_limiter_guard.as_mut() {
+            Some(rl) => {
+                // 已有限流器：更新速率
+                rl.update_rate(config.rate_limit_per_minute).await;
+            }
+                None => {
+                    // 未启用限流 -> 创建新的限流器
+                    *rate_limiter_guard =
+                        Some(RateLimiter::new(config.rate_limit_per_minute));
+                }
+            }
+        } else {
+            // 限流已禁用：移除限流器
+            *rate_limiter_guard = None;
+        }
     }
 
     /// 热更新熔断器配置

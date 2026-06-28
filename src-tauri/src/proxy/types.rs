@@ -25,6 +25,12 @@ pub struct ProxyConfig {
     /// 非流式总超时（秒）- 非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）
     #[serde(default = "default_non_streaming_timeout")]
     pub non_streaming_timeout: u64,
+    /// 是否启用请求限流（默认关闭）
+    #[serde(default)]
+    pub rate_limit_enabled: bool,
+    /// 限流速率：每分钟最大请求数（默认 40）
+    #[serde(default = "default_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
 }
 
 fn default_streaming_first_byte_timeout() -> u64 {
@@ -39,6 +45,10 @@ fn default_non_streaming_timeout() -> u64 {
     600
 }
 
+fn default_rate_limit_per_minute() -> u32 {
+    40
+}
+
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
@@ -51,6 +61,8 @@ impl Default for ProxyConfig {
             streaming_first_byte_timeout: 60,
             streaming_idle_timeout: 120,
             non_streaming_timeout: 600,
+            rate_limit_enabled: false,
+            rate_limit_per_minute: 40,
         }
     }
 }
@@ -89,6 +101,20 @@ pub struct ProxyStatus {
     /// 当前活跃的代理目标列表
     #[serde(default)]
     pub active_targets: Vec<ActiveTarget>,
+    /// 限流状态
+    #[serde(default)]
+    pub rate_limit_status: RateLimitStatus,
+}
+
+/// 限流器运行时状态
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RateLimitStatus {
+    /// 是否已启用限流
+    pub enabled: bool,
+    /// 当前 60s 窗口内已使用的调用次数
+    pub current_count: usize,
+    /// 每分钟最大允许调用次数
+    pub max_per_minute: u32,
 }
 
 /// 活跃的代理目标信息
@@ -162,6 +188,12 @@ pub struct GlobalProxyConfig {
     pub listen_port: u16,
     /// 是否启用日志
     pub enable_logging: bool,
+    /// 是否启用请求限流
+    #[serde(default)]
+    pub rate_limit_enabled: bool,
+    /// 限流速率：每分钟最大请求数
+    #[serde(default = "default_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
 }
 
 /// 应用级代理配置（每个 app 独立）

@@ -114,6 +114,8 @@ pub struct RequestForwarder {
     optimizer_config: OptimizerConfig,
     /// Copilot 优化器配置
     copilot_optimizer_config: CopilotOptimizerConfig,
+    /// 请求限流器（None 表示未启用）
+    rate_limiter: Option<super::rate_limiter::RateLimiter>,
     /// 非流式请求超时（秒）
     non_streaming_timeout: std::time::Duration,
     /// 流式请求响应头等待超时（秒）
@@ -191,6 +193,7 @@ impl RequestForwarder {
         optimizer_config: OptimizerConfig,
         copilot_optimizer_config: CopilotOptimizerConfig,
         max_retries: u32,
+        rate_limiter: Option<super::rate_limiter::RateLimiter>,
     ) -> Self {
         // max_retries 是「失败后重试次数」语义，attempt 上限 = retries + 1。
         // saturating_add 防止 u32::MAX + 1 溢出。
@@ -214,6 +217,7 @@ impl RequestForwarder {
                 streaming_first_byte_timeout,
             ),
             max_attempts,
+            rate_limiter,
         }
     }
 
@@ -1874,6 +1878,11 @@ impl RequestForwarder {
             resolved_claude_api_format.as_deref(),
             is_copilot,
         );
+
+        // 请求限流：如果启用了限流，在发送请求前等待直到有 token
+        if let Some(ref rate_limiter) = self.rate_limiter {
+            rate_limiter.acquire().await;
+        }
 
         // 发送请求
         let response = if is_socks_proxy || !preserve_exact_header_case {

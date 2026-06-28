@@ -198,7 +198,7 @@ impl RequestContext {
     /// 配置生效规则：
     /// - 故障转移开启：超时配置正常生效（0 表示禁用超时）
     /// - 故障转移关闭：超时配置不生效（全部传入 0）
-    pub fn create_forwarder(&self, state: &ProxyState) -> RequestForwarder {
+    pub async fn create_forwarder(&self, state: &ProxyState) -> RequestForwarder {
         let (non_streaming_timeout, first_byte_timeout, idle_timeout) =
             if self.app_config.auto_failover_enabled {
                 // 故障转移开启：使用配置的值（0 = 禁用超时）
@@ -223,6 +223,8 @@ impl RequestContext {
             0
         };
 
+        let rate_limiter = state.rate_limiter.read().await.clone();
+
         RequestForwarder::new(
             state.provider_router.clone(),
             non_streaming_timeout,
@@ -241,6 +243,7 @@ impl RequestContext {
             self.optimizer_config.clone(),
             self.copilot_optimizer_config.clone(),
             max_retries,
+            rate_limiter,
         )
     }
 

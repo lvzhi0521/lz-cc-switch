@@ -391,6 +391,15 @@ impl RequestForwarder {
                 app_type, method, endpoint, body, headers, extensions, providers,
             )
             .await;
+
+        // 请求成功 → 重置全局过载退避计数器（上游已恢复正常）
+        if result.is_ok() {
+            let rl_guard = self.rate_limiter.read().await;
+            if let Some(ref rl) = *rl_guard {
+                rl.reset_on_success();
+            }
+        }
+
         // 把 guard 注入到 Ok 结果，让它随响应一起流转到 response_processor，
         // 在流式 body 的 future 内才真正 drop。
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
@@ -1061,6 +1070,36 @@ impl RequestForwarder {
                                 &e,
                             );
                             log::warn!("[{app_type_str}] [{log_code}] {log_message}");
+
+                            // 上游过载指数退避（429 Too Many Requests / 503 ResourceExhausted）：
+                            // 这两个状态码都表示上游当前无法处理请求——可能是速率限制触发或资源耗尽。
+                            // 立即重试（即使换 provider）只会加重上游负担，可能导致连锁 429/503。
+                            // 退避策略：第 1 次 8s、第 2 次 64s、第 3 次 512s、第 4 次及以上 600s（10 分钟）。
+                            // 退避期间不释放并发许可（请求仍处于"in-flight"状态），避免并发窗口
+                            // 被其他请求填满导致退避结束后再次触发过载。
+                            //
+                            // 注意：过载计数器是全局共享的（在 RateLimiter 中），所有请求共用同一个计数器，
+                            // 这样即使每次都只有 1 个 provider 导致循环只执行一次就退出，
+                            // 下一次客户端请求进入时仍能看到累积的计数并应用更长的退避。
+                            let is_upstream_overloaded = matches!(
+                                &e,
+                                ProxyError::UpstreamError { status, .. } if *status == 429 || *status == 503
+                            );
+                            if is_upstream_overloaded {
+                                // 通过全局 RateLimiter 记录过载 + 计算退避时间（合并为一次原子操作）
+                                let backoff_secs = {
+                                    let rl_guard = self.rate_limiter.read().await;
+                                    if let Some(ref rl) = *rl_guard {
+                                        rl.record_overload_and_get_backoff()  // 原子递增 + 计算退避时间
+                                    } else {
+                                        2 // fallback
+                                    }
+                                };
+                                log::info!(
+                                    "[{app_type_str}] 上游过载 (429/503)，指数退避 {backoff_secs}s 后重试"
+                                );
+                                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                            }
 
                             last_error = Some(e);
                             last_provider = Some(provider.clone());

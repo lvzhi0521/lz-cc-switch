@@ -22,7 +22,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
 
@@ -43,7 +43,7 @@ pub struct RateLimiterStatus {
     pub concurrent_waiting_count: usize,
 }
 
-/// 滑动时间窗口限流器 + 并发控制器
+/// 滑动时间窗口限流器 + 并发控制器 + 过载退避管理
 pub struct RateLimiter {
     /// 频率限流内部状态
     inner: Arc<Mutex<RateLimiterInner>>,
@@ -57,6 +57,10 @@ pub struct RateLimiter {
     max_concurrent: Arc<std::sync::Mutex<u32>>,
     /// 当前正在等待并发许可的请求数
     concurrent_waiting_count: Arc<AtomicUsize>,
+
+    // ====== 全局过载退避状态（跨所有请求共享） ======
+    /// 过载退避计数器：每次上游返回 429/503 时 +1，任何请求成功时归零
+    overload_backoff_count: Arc<AtomicU32>,
 }
 
 struct RateLimiterInner {
@@ -85,6 +89,7 @@ impl RateLimiter {
             concurrency_semaphore: Arc::new(Semaphore::new(max_concurrent as usize)),
             max_concurrent: Arc::new(std::sync::Mutex::new(max_concurrent)),
             concurrent_waiting_count: Arc::new(AtomicUsize::new(0)),
+            overload_backoff_count: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -247,6 +252,45 @@ impl RateLimiter {
         }
     }
 
+    /// ====== 全局过载退避方法 ======
+
+    /// 记录一次上游过载（429/503），同时计算退避时间
+    ///
+    /// 此计数器是**全局共享**的，所有请求共用同一个计数器：
+    /// - 每次调用 fetch_add(1)（原子操作）递增
+    /// - 退避时间：第 1 次 8s、第 2 次 64s、第 3 次 512s、第 4 次及以上 600s（10 分钟）
+    /// - 当任何请求成功时通过 `reset_on_success()` 归零
+    ///
+    /// ⚠️ 合并递增和计算为一次原子操作，避免并发请求在两次独立操作之间
+    /// 递增计数器导致退避时间不精确（偏大）。
+    pub fn record_overload_and_get_backoff(&self) -> u64 {
+        let count = self.overload_backoff_count.fetch_add(1, Ordering::SeqCst) + 1;
+        log::info!(
+            "[RateLimiter] 过载退避计数器: {} (全局共享)",
+            count
+        );
+        match count {
+            1 => 8,
+            2 => 64,
+            3 => 512,
+            _ => 600, // 10 分钟
+        }
+    }
+
+    /// 当请求成功时重置过载退避计数器
+    ///
+    /// 上游恢复正常后，后续请求不应再受之前的过载退避影响。
+    /// 在 `forward_with_retry` 的 Ok 分支中调用。
+    pub fn reset_on_success(&self) {
+        let prev = self.overload_backoff_count.swap(0, Ordering::SeqCst);
+        if prev > 0 {
+            log::info!(
+                "[RateLimiter] 上游已恢复，过载退避计数器从 {} 重置为 0",
+                prev
+            );
+        }
+    }
+
     /// 清除超过窗口大小的旧记录
     fn evict_expired(inner: &mut RateLimiterInner, now: Instant, window: Duration) {
         while let Some(&t) = inner.request_times.front() {
@@ -268,6 +312,7 @@ impl Clone for RateLimiter {
             concurrency_semaphore: Arc::clone(&self.concurrency_semaphore),
             max_concurrent: Arc::clone(&self.max_concurrent),
             concurrent_waiting_count: Arc::clone(&self.concurrent_waiting_count),
+            overload_backoff_count: Arc::clone(&self.overload_backoff_count),
         }
     }
 }
